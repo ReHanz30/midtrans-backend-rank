@@ -1,72 +1,113 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const admin = require('firebase-admin');
 const cors = require('cors');
-const axios = require('axios');
+const midtransClient = require('midtrans-client');
 
 const app = express();
+const port = process.env.PORT || 3000;
+
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-const db = admin.firestore();
-
-app.post('/webhook', async (req, res) => {
-  const notif = req.body;
-  const orderId = notif.order_id;
-  const transactionStatus = notif.transaction_status;
-
-  try {
-    const checkoutRef = db.collection('checkout').where('order_id', '==', orderId);
-    const snapshot = await checkoutRef.get();
-    if (snapshot.empty) return res.status(404).send('Not found');
-
-    snapshot.forEach(async doc => {
-      const statusUpdate = (transactionStatus === 'settlement' || transactionStatus === 'capture') 
-        ? 'Lunas' 
-        : (transactionStatus === 'expire') ? 'Kadaluarsa' : transactionStatus;
-      await doc.ref.update({ status: statusUpdate });
-    });
-
-    res.status(200).send('OK');
-  } catch (e) {
-    res.status(500).send('Error updating Firestore');
-  }
+// Midtrans Snap Client
+const snap = new midtransClient.Snap({
+  isProduction: false, // Ganti ke true jika sudah live
+  serverKey: 'SB-Mid-server-_uhwBkOu0FStAKYJp08jZ2nF',
+  clientKey: 'SB-Mid-client-W_gnT3Ca7HcpFv9I'
 });
 
+// Midtrans Core API Client (untuk cek status)
+const coreApi = new midtransClient.CoreApi({
+  isProduction: false,
+  serverKey: 'SB-Mid-server-_uhwBkOu0FStAKYJp08jZ2nF',
+  clientKey: 'SB-Mid-client-W_gnT3Ca7HcpFv9I'
+});
+
+// Buat transaksi Snap
 app.post('/create-transaction', async (req, res) => {
   const { order_id, amount, payment_type, customer_details, item_details } = req.body;
 
   try {
-    const snapResponse = await axios.post('https://app.sandbox.midtrans.com/snap/v1/transactions', {
+    const parameter = {
       transaction_details: {
-        order_id: order_id,
+        order_id,
         gross_amount: amount
       },
-      payment_type: payment_type,
-      customer_details: customer_details,
-      item_details: [item_details]
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${Buffer.from(process.env.MIDTRANS_SERVER_KEY + ':').toString('base64')}`
-      }
-    });
+      credit_card: {
+        secure: true
+      },
+      customer_details,
+      item_details: [item_details],
+      enabled_payments: [payment_type.toLowerCase()]
+    };
 
-    res.json({ token: snapResponse.data.token });
-  } catch (error) {
-    console.error('Midtrans error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to create transaction' });
+    const transaction = await snap.createTransaction(parameter);
+
+    res.json({
+      token: transaction.token,
+      redirect_url: transaction.redirect_url
+    });
+  } catch (err) {
+    console.error('Error creating transaction:', err.message);
+    res.status(500).json({ error: true, message: err.message });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('Midtrans backend with Firestore is running!');
+// Endpoint untuk retry transaksi jika diperlukan
+app.post('/retry-transaction', async (req, res) => {
+  const { order_id, amount, payment_type } = req.body;
+
+  try {
+    const parameter = {
+      transaction_details: {
+        order_id,
+        gross_amount: amount
+      },
+      enabled_payments: [payment_type.toLowerCase()]
+    };
+
+    const transaction = await snap.createTransaction(parameter);
+
+    res.json({
+      token: transaction.token,
+      redirect_url: transaction.redirect_url
+    });
+  } catch (err) {
+    console.error('Error retrying transaction:', err.message);
+    res.status(500).json({ error: true, message: err.message });
+  }
 });
 
-// FIX: Gunakan PORT dari environment Railway
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Endpoint untuk cek status transaksi
+app.get("/check-transaction/:order_id", async (req, res) => {
+  const { order_id } = req.params;
+
+  try {
+    const result = await coreApi.transaction.status(order_id);
+
+    res.json({
+      status: result.transaction_status,
+      payment_type: result.payment_type,
+      order_id: result.order_id,
+      gross_amount: result.gross_amount,
+      fraud_status: result.fraud_status,
+      transaction_time: result.transaction_time,
+      token: result.token || null,
+      redirect_url: result.redirect_url || null
+    });
+  } catch (error) {
+    console.error("Gagal cek transaksi:", error.message);
+    res.status(404).json({
+      error: true,
+      message: "Transaction not found"
+    });
+  }
+});
+
+// Tes koneksi
+app.get('/', (req, res) => {
+  res.send('Midtrans Backend Rank API Aktif');
+});
+
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
