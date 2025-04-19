@@ -53,9 +53,6 @@ app.post('/create-transaction', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
     
-    // Log the request for debugging
-    console.log('Create transaction request:', req.body);
-    
     // Prepare transaction parameters
     const transactionParams = {
       transaction_details: {
@@ -67,8 +64,8 @@ app.post('/create-transaction', async (req, res) => {
       },
       customer_details: {
         first_name: customer_details.nickname,
-        email: `${customer_details.nickname.toLowerCase()}@example.com`, // Use placeholder email
-        phone: '081234567890' // Use placeholder phone
+        email: `${customer_details.nickname.toLowerCase()}@example.com`,
+        phone: '081234567890'
       },
       item_details: [{
         id: item_details.id,
@@ -83,9 +80,6 @@ app.post('/create-transaction', async (req, res) => {
     // Create transaction
     const transaction = await snap.createTransaction(transactionParams);
     
-    // Log the response for debugging
-    console.log('Midtrans response:', transaction);
-    
     res.status(200).json({
       token: transaction.token,
       redirect_url: transaction.redirect_url
@@ -99,48 +93,8 @@ app.post('/create-transaction', async (req, res) => {
   }
 });
 
-// Retry transaction
-app.post('/retry-transaction', async (req, res) => {
-  try {
-    const { order_id, amount, payment_type } = req.body;
-    
-    if (!order_id || !amount) {
-      return res.status(400).json({ error: 'Missing required parameters' });
-    }
-    
-    // Create a new unique order ID based on the original one
-    const new_order_id = `${order_id}_RETRY_${Date.now().toString().substring(8, 13)}`;
-    
-    // Prepare transaction parameters
-    const transactionParams = {
-      transaction_details: {
-        order_id: new_order_id,
-        gross_amount: parseInt(amount)
-      },
-      credit_card: {
-        secure: true
-      }
-    };
-    
-    // Create transaction
-    const transaction = await snap.createTransaction(transactionParams);
-    
-    res.status(200).json({
-      token: transaction.token,
-      redirect_url: transaction.redirect_url,
-      new_order_id: new_order_id
-    });
-  } catch (error) {
-    console.error('Error retrying transaction:', error);
-    res.status(500).json({
-      error: true,
-      message: error.message || 'Failed to retry transaction'
-    });
-  }
-});
-
-// Check transaction status
-app.get('/check-transaction/:order_id', async (req, res) => {
+// Get transaction by order ID
+app.get('/transactions/:order_id', async (req, res) => {
   try {
     const order_id = req.params.order_id;
     
@@ -151,42 +105,47 @@ app.get('/check-transaction/:order_id', async (req, res) => {
     // Check transaction status from Midtrans
     const status = await snap.transaction.status(order_id);
     
-    // If transaction exists but needs a new token
-    if (status && (status.transaction_status === 'pending' || status.transaction_status === 'expire')) {
-      // Create a new transaction token for the same order ID
-      try {
-        const transactionParams = {
-          transaction_details: {
-            order_id: `${order_id}_REFRESH_${Date.now().toString().substring(8, 13)}`,
-            gross_amount: parseInt(status.gross_amount)
-          },
-          credit_card: {
-            secure: true
-          }
-        };
-        
-        const newTransaction = await snap.createTransaction(transactionParams);
-        
-        return res.status(200).json({
-          status: status.transaction_status,
-          token: newTransaction.token,
-          redirect_url: newTransaction.redirect_url,
-          transaction_details: status
-        });
-      } catch (newTokenError) {
-        console.error('Error creating new token:', newTokenError);
-        return res.status(200).json({
-          status: status.transaction_status,
-          transaction_details: status
-        });
+    // Create a new transaction token for the same transaction if needed
+    const transactionParams = {
+      transaction_details: {
+        order_id: order_id,
+        gross_amount: parseInt(status.gross_amount)
+      },
+      credit_card: {
+        secure: true
       }
-    }
+    };
     
-    return res.status(200).json({
+    const newTransaction = await snap.createTransaction(transactionParams);
+    
+    res.status(200).json({
+      token: newTransaction.token,
+      redirect_url: newTransaction.redirect_url,
       status: status.transaction_status,
       transaction_details: status
     });
+  } catch (error) {
+    console.error('Error getting transaction:', error);
+    res.status(500).json({
+      error: true,
+      message: error.message || 'Failed to get transaction'
+    });
+  }
+});
+
+// Check transaction status
+app.get('/status/:order_id', async (req, res) => {
+  try {
+    const order_id = req.params.order_id;
     
+    if (!order_id) {
+      return res.status(400).json({ error: 'Missing order ID' });
+    }
+    
+    // Check transaction status from Midtrans
+    const status = await snap.transaction.status(order_id);
+    
+    return res.status(200).json(status);
   } catch (error) {
     console.error('Error checking transaction:', error);
     res.status(500).json({
@@ -201,9 +160,6 @@ app.post('/webhook', async (req, res) => {
   try {
     const notification = req.body;
     
-    // Log the notification for debugging
-    console.log('Received webhook notification:', notification);
-    
     // Verify the notification signature
     const verificationResult = await snap.transaction.notification(notification);
     
@@ -214,26 +170,6 @@ app.post('/webhook', async (req, res) => {
     
     // Sample transaction status handling
     let message = `Transaction notification received. Order ID: ${orderId}. Transaction status: ${transactionStatus}. Fraud status: ${fraudStatus}`;
-    
-    // Handle transaction status
-    if (transactionStatus === 'capture') {
-      if (fraudStatus === 'challenge') {
-        // TODO: handle transaction with challenge fraud status
-        message = `Transaction with order ID: ${orderId} is challenged by FDS`;
-      } else if (fraudStatus === 'accept') {
-        // TODO: handle successful transaction
-        message = `Transaction with order ID: ${orderId} is completed successfully`;
-      }
-    } else if (transactionStatus === 'settlement') {
-      // TODO: handle successful transaction
-      message = `Transaction with order ID: ${orderId} has been settled`;
-    } else if (transactionStatus === 'cancel' || transactionStatus === 'deny' || transactionStatus === 'expire') {
-      // TODO: handle failed transaction
-      message = `Transaction with order ID: ${orderId} is ${transactionStatus}`;
-    } else if (transactionStatus === 'pending') {
-      // TODO: handle pending transaction
-      message = `Transaction with order ID: ${orderId} is pending`;
-    }
     
     console.log(message);
     
