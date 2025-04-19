@@ -1,15 +1,21 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
+const cors = require('cors'); // Tambahkan ini
+const axios = require('axios');
+
 const app = express();
+app.use(cors()); // Izinkan CORS
 app.use(bodyParser.json());
 
+// Firebase credentials
 const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 const db = admin.firestore();
 
+// Webhook Midtrans
 app.post('/webhook', async (req, res) => {
   const notif = req.body;
   const orderId = notif.order_id;
@@ -18,19 +24,13 @@ app.post('/webhook', async (req, res) => {
   try {
     const checkoutRef = db.collection('checkout').where('order_id', '==', orderId);
     const snapshot = await checkoutRef.get();
-    if (snapshot.empty) {
-      console.log('No matching documents.');
-      return res.status(404).send('Not found');
-    }
+    if (snapshot.empty) return res.status(404).send('Not found');
 
     snapshot.forEach(async doc => {
-      if (transactionStatus === 'settlement' || transactionStatus === 'capture') {
-        await doc.ref.update({ status: 'Lunas' });
-      } else if (transactionStatus === 'expire') {
-        await doc.ref.update({ status: 'Kadaluarsa' });
-      } else {
-        await doc.ref.update({ status: transactionStatus });
-      }
+      const statusUpdate = (transactionStatus === 'settlement' || transactionStatus === 'capture') 
+        ? 'Lunas' 
+        : (transactionStatus === 'expire') ? 'Kadaluarsa' : transactionStatus;
+      await doc.ref.update({ status: statusUpdate });
     });
 
     res.status(200).send('OK');
@@ -39,9 +39,38 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('Midtrans Webhook is running securely!');
+// Route untuk create Snap transaction
+app.post('/create-transaction', async (req, res) => {
+  const { order_id, amount, payment_type, customer_details, item_details } = req.body;
+
+  try {
+    const snapResponse = await axios.post('https://app.sandbox.midtrans.com/snap/v1/transactions', {
+      transaction_details: {
+        order_id: order_id,
+        gross_amount: amount
+      },
+      payment_type: payment_type,
+      customer_details: customer_details,
+      item_details: [item_details]
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${Buffer.from(process.env.MIDTRANS_SERVER_KEY + ':').toString('base64')}`
+      }
+    });
+
+    res.json({ token: snapResponse.data.token });
+  } catch (error) {
+    console.error('Midtrans error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create transaction' });
+  }
 });
 
+// Root
+app.get('/', (req, res) => {
+  res.send('Midtrans backend with Firestore is running!');
+});
+
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
