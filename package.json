@@ -1,17 +1,32 @@
 {
-  "name": "midtrans-backend",
+  "name": "midtrans-backend-rank",
   "version": "1.0.0",
-  "description": "Midtrans backend for rank checkout",
+  "description": "Backend server for KuyCountry Minecraft rank purchase with Midtrans integration",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [
+    "midtrans",
+    "payment",
+    "minecraft",
+    "api"
+  ],
+  "author": "KuyCountry Store",
+  "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "firebase-admin": "^11.5.0",
-    "axios": "^1.6.7",
+    "body-parser": "^1.20.2",
     "cors": "^2.8.5",
-    "midtrans-client": "^1.3.0",
-    "dotenv": "^16.0.3"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "midtrans-client": "^1.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   }
 }
