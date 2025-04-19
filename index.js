@@ -1,21 +1,19 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
-const cors = require('cors'); // Tambahkan ini
+const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
-app.use(cors()); // Izinkan CORS
+app.use(cors());
 app.use(bodyParser.json());
 
-// Firebase credentials
 const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 const db = admin.firestore();
 
-// Webhook Midtrans
 app.post('/webhook', async (req, res) => {
   const notif = req.body;
   const orderId = notif.order_id;
@@ -39,7 +37,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Route untuk create Snap transaction
 app.post('/create-transaction', async (req, res) => {
   const { order_id, amount, payment_type, customer_details, item_details } = req.body;
 
@@ -66,11 +63,10 @@ app.post('/create-transaction', async (req, res) => {
   }
 });
 
-// Root
 app.get('/', (req, res) => {
   res.send('Midtrans backend with Firestore is running!');
 });
 
-// Start server
+// FIX: Gunakan PORT dari environment Railway
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
