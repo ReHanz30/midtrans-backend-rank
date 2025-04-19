@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const midtransClient = require('midtrans-client');
+require('dotenv').config(); // load .env
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -8,18 +9,20 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Midtrans Snap Client
+// Ambil dari .env
+const serverKey = process.env.MIDTRANS_SERVER_KEY;
+const clientKey = process.env.MIDTRANS_CLIENT_KEY;
+
 const snap = new midtransClient.Snap({
-  isProduction: false, // Ganti ke true jika sudah live
-  serverKey: 'SB-Mid-server-_uhwBkOu0FStAKYJp08jZ2nF',
-  clientKey: 'SB-Mid-client-W_gnT3Ca7HcpFv9I'
+  isProduction: false,
+  serverKey: serverKey,
+  clientKey: clientKey
 });
 
-// Midtrans Core API Client (untuk cek status)
 const coreApi = new midtransClient.CoreApi({
   isProduction: false,
-  serverKey: 'SB-Mid-server-_uhwBkOu0FStAKYJp08jZ2nF',
-  clientKey: 'SB-Mid-client-W_gnT3Ca7HcpFv9I'
+  serverKey: serverKey,
+  clientKey: clientKey
 });
 
 // Buat transaksi Snap
@@ -32,16 +35,13 @@ app.post('/create-transaction', async (req, res) => {
         order_id,
         gross_amount: amount
       },
-      credit_card: {
-        secure: true
-      },
+      credit_card: { secure: true },
       customer_details,
       item_details: [item_details],
       enabled_payments: [payment_type.toLowerCase()]
     };
 
     const transaction = await snap.createTransaction(parameter);
-
     res.json({
       token: transaction.token,
       redirect_url: transaction.redirect_url
@@ -52,7 +52,7 @@ app.post('/create-transaction', async (req, res) => {
   }
 });
 
-// Endpoint untuk retry transaksi jika diperlukan
+// Retry transaksi
 app.post('/retry-transaction', async (req, res) => {
   const { order_id, amount, payment_type } = req.body;
 
@@ -66,7 +66,6 @@ app.post('/retry-transaction', async (req, res) => {
     };
 
     const transaction = await snap.createTransaction(parameter);
-
     res.json({
       token: transaction.token,
       redirect_url: transaction.redirect_url
@@ -77,13 +76,12 @@ app.post('/retry-transaction', async (req, res) => {
   }
 });
 
-// Endpoint untuk cek status transaksi
+// Cek status transaksi
 app.get("/check-transaction/:order_id", async (req, res) => {
   const { order_id } = req.params;
 
   try {
     const result = await coreApi.transaction.status(order_id);
-
     res.json({
       status: result.transaction_status,
       payment_type: result.payment_type,
@@ -96,10 +94,7 @@ app.get("/check-transaction/:order_id", async (req, res) => {
     });
   } catch (error) {
     console.error("Gagal cek transaksi:", error.message);
-    res.status(404).json({
-      error: true,
-      message: "Transaction not found"
-    });
+    res.status(404).json({ error: true, message: "Transaction not found" });
   }
 });
 
@@ -109,5 +104,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
