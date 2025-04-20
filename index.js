@@ -95,60 +95,42 @@ app.post('/create-transaction', async (req, res) => {
 
 // Get transaction by ID
 app.get('/transactions/:orderId', async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    
-    if (!orderId) {
-      return res.status(400).json({ error: 'Order ID is required' });
-    }
+  try {
+    const { orderId } = req.params;
 
-    console.log('Getting transaction for order:', orderId);
+    if (!orderId) {
+      return res.status(400).json({ error: 'Order ID is required' });
+    }
 
-    // Get transaction status from Midtrans
-    const response = await axios.get(`${MIDTRANS_API_URL}/v2/${orderId}/status`, {
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': getMidtransAuth()
-      }
-    });
+    console.log('Getting transaction status for:', orderId);
 
-    console.log('Transaction response:', response.data);
+    const response = await axios.get(`${MIDTRANS_API_URL}/v2/${orderId}/status`, {
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': getMidtransAuth()
+      }
+    });
 
-    // Get token for the transaction
-    const tokenResponse = await axios.post(`${MIDTRANS_SNAP_URL}/token`, {
-      transaction_details: {
-        order_id: orderId,
-        gross_amount: response.data.gross_amount
-      },
-      customer_details: {
-        first_name: response.data.order_id
-      }
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': getMidtransAuth()
-      }
-    });
+    return res.status(200).json({
+      order_id: response.data.order_id,
+      status: response.data.transaction_status,
+      transaction_time: response.data.transaction_time,
+      payment_type: response.data.payment_type,
+      gross_amount: response.data.gross_amount,
+      ...response.data
+    });
+  } catch (error) {
+    console.error('Error getting transaction status:', error.message);
+    console.error(error.response?.data || error);
 
-    console.log('Token response:', tokenResponse.data);
-
-    return res.status(200).json({
-      order_id: response.data.order_id,
-      status: response.data.transaction_status,
-      token: tokenResponse.data.token
-    });
-  } catch (error) {
-    console.error('Error getting transaction:', error.message);
-    console.error(error.response?.data || error);
-    
-    return res.status(500).json({
-      error: 'Failed to get transaction',
-      message: error.message,
-      details: error.response?.data || {}
-    });
-  }
+    return res.status(500).json({
+      error: 'Failed to get transaction status',
+      message: error.message,
+      details: error.response?.data || {}
+    });
+  }
 });
+
 
 // Check transaction status
 app.get('/status/:orderId', async (req, res) => {
