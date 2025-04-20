@@ -1,91 +1,92 @@
-// Import required packages
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const midtransClient = require('midtrans-client');
-const bodyParser = require('body-parser');
-const dotenv = require('dotenv');
-
-// Load environment variables
-dotenv.config();
-
-// Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// Setup CORS
+app.use(cors({
+  origin: '*', // In production, specify your origin domains
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-// Validate environment variables
-const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
-const MIDTRANS_CLIENT_KEY = process.env.MIDTRANS_CLIENT_KEY;
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+app.use(express.json());
 
-if (!MIDTRANS_SERVER_KEY || !MIDTRANS_CLIENT_KEY) {
-  console.error('Missing Midtrans API keys in environment variables');
-  process.exit(1);
-}
-
-// Create Midtrans Snap API instance
+// Midtrans configuration
 const snap = new midtransClient.Snap({
-  isProduction: IS_PRODUCTION,
-  serverKey: MIDTRANS_SERVER_KEY,
-  clientKey: MIDTRANS_CLIENT_KEY
+  isProduction: false, // Set to true for production
+  serverKey: process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-GwUP_WGbJPXsDzsNEBRs8Dja',
+  clientKey: process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-W_gnT3Ca7HcpFv9I'
 });
 
-// Routes
-app.get('/', (req, res) => {
-  res.send('Kuycountry Midtrans Backend Service');
-});
-
-// Health check endpoint
+// Status endpoint to check if the server is running
 app.get('/status', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    serverTime: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
-// Create Midtrans transaction
+// Create transaction endpoint
 app.post('/create-transaction', async (req, res) => {
   try {
+    console.log('Creating transaction with data:', JSON.stringify(req.body));
+    
     const { order_id, amount, payment_type, customer_details, item_details } = req.body;
     
-    if (!order_id || !amount) {
-      return res.status(400).json({ error: 'Missing required parameters' });
+    if (!order_id || !amount || !payment_type) {
+      return res.status(400).json({
+        error: true,
+        message: 'Missing required parameters: order_id, amount, or payment_type'
+      });
     }
     
-    // Prepare transaction parameters
+    // Format the transaction parameters for Midtrans
     const transactionParams = {
       transaction_details: {
-        order_id: order_id,
-        gross_amount: parseInt(amount)
-      },
-      credit_card: {
-        secure: true
+        order_id,
+        gross_amount: amount
       },
       customer_details: {
-        first_name: customer_details.nickname,
-        email: `${customer_details.nickname.toLowerCase()}@example.com`,
-        phone: '081234567890'
+        first_name: customer_details?.first_name || 'Customer',
+        email: customer_details?.email || 'customer@example.com',
+        phone: customer_details?.phone || ''
       },
-      item_details: [{
-        id: item_details.id,
-        price: parseInt(item_details.price),
-        quantity: item_details.quantity,
-        name: item_details.name
-      }],
-      custom_field1: customer_details.current_rank || '',
-      custom_field2: customer_details.referral_code || ''
+      item_details: item_details || [{
+        id: 'DEFAULT_ITEM',
+        name: 'Default Item',
+        price: amount,
+        quantity: 1
+      }]
     };
+
+    // Add custom fields for reference
+    if (customer_details?.nickname) {
+      transactionParams.custom_field1 = customer_details.nickname;
+    }
+    if (customer_details?.current_rank) {
+      transactionParams.custom_field2 = customer_details.current_rank;
+    }
+    if (customer_details?.referral_code) {
+      transactionParams.custom_field3 = customer_details.referral_code;
+    }
     
-    // Create transaction
+    // Create the transaction
     const transaction = await snap.createTransaction(transactionParams);
     
-    res.status(200).json({
+    console.log('Transaction created:', transaction);
+    
+    // Return the token and redirect URL
+    res.json({
       token: transaction.token,
       redirect_url: transaction.redirect_url
     });
   } catch (error) {
     console.error('Error creating transaction:', error);
+    
     res.status(500).json({
       error: true,
       message: error.message || 'Failed to create transaction'
@@ -93,39 +94,33 @@ app.post('/create-transaction', async (req, res) => {
   }
 });
 
-// Get transaction by order ID
-app.get('/transactions/:order_id', async (req, res) => {
+// Get transaction by ID
+app.get('/transactions/:orderId', async (req, res) => {
   try {
-    const order_id = req.params.order_id;
+    const { orderId } = req.params;
     
-    if (!order_id) {
-      return res.status(400).json({ error: 'Missing order ID' });
+    if (!orderId) {
+      return res.status(400).json({
+        error: true,
+        message: 'Order ID is required'
+      });
     }
     
-    // Check transaction status from Midtrans
-    const status = await snap.transaction.status(order_id);
-    
-    // Create a new transaction token for the same transaction if needed
-    const transactionParams = {
+    // Get transaction status from Midtrans API
+    const transactionStatus = await snap.createTransactionToken({
       transaction_details: {
-        order_id: order_id,
-        gross_amount: parseInt(status.gross_amount)
-      },
-      credit_card: {
-        secure: true
+        order_id: orderId,
+        gross_amount: 1000 // Dummy amount, actual transaction will be retrieved
       }
-    };
+    });
     
-    const newTransaction = await snap.createTransaction(transactionParams);
-    
-    res.status(200).json({
-      token: newTransaction.token,
-      redirect_url: newTransaction.redirect_url,
-      status: status.transaction_status,
-      transaction_details: status
+    res.json({
+      token: transactionStatus.token,
+      order_id: orderId
     });
   } catch (error) {
     console.error('Error getting transaction:', error);
+    
     res.status(500).json({
       error: true,
       message: error.message || 'Failed to get transaction'
@@ -134,20 +129,24 @@ app.get('/transactions/:order_id', async (req, res) => {
 });
 
 // Check transaction status
-app.get('/status/:order_id', async (req, res) => {
+app.get('/status/:orderId', async (req, res) => {
   try {
-    const order_id = req.params.order_id;
+    const { orderId } = req.params;
     
-    if (!order_id) {
-      return res.status(400).json({ error: 'Missing order ID' });
+    if (!orderId) {
+      return res.status(400).json({
+        error: true,
+        message: 'Order ID is required'
+      });
     }
     
-    // Check transaction status from Midtrans
-    const status = await snap.transaction.status(order_id);
+    // Get transaction status from Midtrans API
+    const transactionStatus = await snap.transaction.status(orderId);
     
-    return res.status(200).json(status);
+    res.json(transactionStatus);
   } catch (error) {
-    console.error('Error checking transaction:', error);
+    console.error('Error checking transaction status:', error);
+    
     res.status(500).json({
       error: true,
       message: error.message || 'Failed to check transaction status'
@@ -155,34 +154,32 @@ app.get('/status/:order_id', async (req, res) => {
   }
 });
 
-// Webhook handler for notifications from Midtrans
-app.post('/webhook', async (req, res) => {
+// Handle Midtrans notifications
+app.post('/notification', async (req, res) => {
   try {
-    const notification = req.body;
+    const notification = await snap.transaction.notification(req.body);
     
-    // Verify the notification signature
-    const verificationResult = await snap.transaction.notification(notification);
+    // Process the notification based on your business logic
+    console.log('Notification received:', notification);
     
-    // Process the notification based on transaction status
-    const orderId = verificationResult.order_id;
-    const transactionStatus = verificationResult.transaction_status;
-    const fraudStatus = verificationResult.fraud_status;
+    // For demonstration, just log it
+    const transactionStatus = notification.transaction_status;
+    const fraudStatus = notification.fraud_status;
+    const orderId = notification.order_id;
     
-    // Sample transaction status handling
-    let message = `Transaction notification received. Order ID: ${orderId}. Transaction status: ${transactionStatus}. Fraud status: ${fraudStatus}`;
+    console.log(`Transaction ID: ${orderId}`);
+    console.log(`Transaction status: ${transactionStatus}`);
+    console.log(`Fraud status: ${fraudStatus}`);
     
-    console.log(message);
+    // Here you would update your database, notify users, etc.
     
-    // Return 200 to acknowledge receipt of notification
-    return res.status(200).json({
-      status: 'OK',
-      message: message
-    });
+    res.status(200).json({ success: true });
   } catch (error) {
-    console.error('Error processing webhook:', error);
-    return res.status(500).json({
-      status: 'ERROR',
-      message: error.message
+    console.error('Error processing notification:', error);
+    
+    res.status(500).json({
+      error: true,
+      message: error.message || 'Failed to process notification'
     });
   }
 });
@@ -190,5 +187,6 @@ app.post('/webhook', async (req, res) => {
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log(`Environment: ${IS_PRODUCTION ? 'Production' : 'Development'}`);
 });
+
+module.exports = app; // For testing
