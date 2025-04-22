@@ -35,7 +35,7 @@ app.get('/status', (req, res) => {
 // Create transaction in Midtrans
 app.post('/create-transaction', async (req, res) => {
   try {
-    const { order_id, amount, payment_type, customer_details, item_details } = req.body;
+const { order_id, amount, customer_details, item_details } = req.body;
 
     if (!order_id || !amount) {
       return res.status(400).json({ error: 'Missing required fields' });
