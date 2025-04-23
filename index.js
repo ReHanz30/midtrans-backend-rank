@@ -41,7 +41,7 @@ const { order_id, amount, customer_details, item_details } = req.body;
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    console.log('Creating transaction:', { order_id, amount, payment_type });
+    console.log('Creating transaction:', { order_id, amount });
 
     // Prepare transaction data for Midtrans
     const transactionData = {
